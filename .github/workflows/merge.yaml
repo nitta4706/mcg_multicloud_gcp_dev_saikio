@@ -1,0 +1,56 @@
+name: merge
+  
+# main ブランチへのPull Request と Merge をトリガーに指定
+on:
+  pull_request:
+    branches:
+      - 'prd/**'
+    types: 
+      - closed
+
+# ジョブ / ステップ / アクションの定義
+jobs:
+  test-gha:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v3
+
+      - name: Make Google group
+        id: make_group
+        working-directory: python
+        run: python3 make_group.py
+
+      # https://github.com/marketplace/actions/setup-tfcmt      
+      - name: Setup tfcmt
+        uses: ./.github/actions/setup-tfcmt
+
+      # Terraformのコマンド実行に必要
+      # https://github.com/actions/setup-node
+      # https://github.com/hashicorp/setup-terraform/issues/84
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      
+      # Terraformインストール
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Apply (env)
+        id: apply_env
+        working-directory: terraform/env
+        run: |
+          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          for env in $( ls -d */ ); do
+            cd ${env}
+            terraform init -upgrade
+            tfcmt apply -- terraform apply -var-file common.tfvars -var-file project_info.tfvars -auto-approve -input=false
+            cd ..
+          done

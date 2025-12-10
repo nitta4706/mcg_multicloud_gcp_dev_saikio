@@ -1,0 +1,33 @@
+name: 'Setup tfcmt with fallback'
+description: 'Installs the latest tfcmt, with a fallback to a specific version'
+inputs:
+  version:
+    description: 'The fallback version of tfcmt to install if latest fails'
+    required: true
+    default: 'v4.14.8'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install tfcmt with fallback
+      run: |
+        FALLBACK_VERSION="${{ inputs.version }}"
+        
+        # 1. インストール先のディレクトリを作成
+        INSTALL_DIR="$HOME/.local/bin"
+        mkdir -p "$INSTALL_DIR"
+
+        echo "--- Attempting to install the latest version of tfcmt ---"
+        wget --quiet "https://github.com/suzuki-shunsuke/tfcmt/releases/latest/download/tfcmt_linux_amd64.tar.gz" -O tfcmt.tar.gz || {
+          echo "--- Failed to download the latest version. Falling back to ${FALLBACK_VERSION} ---"
+          wget "https://github.com/suzuki-shunsuke/tfcmt/releases/download/${FALLBACK_VERSION}/tfcmt_linux_amd64.tar.gz" -O tfcmt.tar.gz
+        }
+        
+        # 2. ダウンロードしたファイルをインストール先ディレクトリに展開
+        tar -xzf tfcmt.tar.gz -C "$INSTALL_DIR" tfcmt
+
+        # 3. インストールしたディレクトリにPATHを通す
+        echo "$INSTALL_DIR" >> $GITHUB_PATH
+
+        echo "--- tfcmt installed successfully ---"
+        tfcmt --version
+      shell: bash

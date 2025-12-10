@@ -1,0 +1,66 @@
+name: pull_request
+  
+on:
+  pull_request:
+    branches:
+      - 'prd/**'
+    types:
+      - opened
+
+# ジョブ / ステップ / アクションの定義
+jobs:
+  test-gha:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+
+      # https://github.com/marketplace/actions/setup-tfcmt      
+      - name: Setup tfcmt
+        uses: ./.github/actions/setup-tfcmt
+
+      # Terraformのコマンド実行に必要
+      # https://github.com/actions/setup-node
+      # https://github.com/hashicorp/setup-terraform/issues/84
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      
+      # Terraformインストール
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Plan (common)
+        id: plan_common
+        working-directory: terraform/common
+        run: |
+          terraform init -upgrade
+          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          tfcmt plan -- terraform plan -var-file common.tfvars -var-file project_info.tfvars -no-color -input=false
+
+      - name: Terraform Apply (common)
+        id: apply_common
+        working-directory: terraform/common
+        run: |
+          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          tfcmt apply -- terraform apply -var-file common.tfvars -var-file project_info.tfvars -auto-approve -input=false
+
+      - name: Terraform Plan (env)
+        id: plan_env
+        working-directory: terraform/env
+        run: |
+          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          for env in $( ls -d */ ); do
+            cd ${env}
+            terraform init -upgrade
+            tfcmt plan -- terraform plan -var-file common.tfvars -var-file project_info.tfvars -no-color -input=false
+            cd ..
+          done
