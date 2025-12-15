@@ -1,73 +1,81 @@
-apt-get update -y && apt-get install unzip python3-pip -y
+#!/bin/bash
+
+# --- 1. 基本ツールのセットアップ ---
+apt-get update -y && apt-get install unzip python3-pip git -y
 python3 -m pip install google-api-python-client==2.72.0 --break-system-packages
 
-
-# https://docs.docker.com/engine/install/ubuntu/
-# Add Docker's official GPG key:
+# Dockerインストール
 apt-get install ca-certificates curl gnupg -y
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
-
-# Add the repository to apt-get sources:
 echo \
   "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
   "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
   tee /etc/apt/sources.list.d/docker.list > /dev/null
 apt-get update -y
-
-# Install the Docker packages:
 apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
 
+# --- 2. Runnerセットアップ用関数 (ここがBand 7の技) ---
+setup_runner() {
+    local DIR_NAME=$1
+    local REPO_URL=$2
+    local TOKEN=$3
+    local RUNNER_SUFFIX=$4
 
-# Download GitHub Actions (mcg_multicloud_gcp)
-cd /opt
-mkdir -p actions-runner/mcg_multicloud_gcp && cd actions-runner/mcg_multicloud_gcp
-curl -o actions-runner-linux-x64-2.320.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.320.0/actions-runner-linux-x64-2.320.0.tar.gz
-echo "93ac1b7ce743ee85b5d386f5c1787385ef07b3d7c728ff66ce0d3813d5f46900  actions-runner-linux-x64-2.320.0.tar.gz" | shasum -a 256 -c
-tar xzf ./actions-runner-linux-x64-2.320.0.tar.gz
+    echo "=== Setting up Runner for: $DIR_NAME ==="
+    
+    # ディレクトリ準備
+    mkdir -p "/opt/actions-runner/$DIR_NAME"
+    cd "/opt/actions-runner/$DIR_NAME"
 
-# Configure GitHub Actions
-RUNNER_ALLOW_RUNASROOT=1 ./config.sh --url https://github.com/mec-mcg/mcg_multicloud_gcp_dev --token A5RUTNMV233WG3XQBG5ZPXTHD6GW6
+    # ダウンロード (既にファイルがあればスキップするロジックも可だが、念のため上書き)
+    curl -o runner.tar.gz -L https://github.com/actions/runner/releases/download/v2.320.0/actions-runner-linux-x64-2.320.0.tar.gz
+    # チェックサム確認等は省略(必要なら追加)
+    tar xzf runner.tar.gz
 
-./svc.sh install
-./svc.sh start
+    # コンフィグ設定
+    # --name にサフィックスを付けて、GitHub管理画面で見分けやすくする
+    export RUNNER_ALLOW_RUNASROOT=1
+    ./config.sh \
+        --url "$REPO_URL" \
+        --token "$TOKEN" \
+        --unattended \
+        --replace \
+        --name "$(hostname)-$RUNNER_SUFFIX"
 
-# Download GitHub Actions (mcg_multicloud_gcp_secure)
-cd /opt
-mkdir -p actions-runner/mcg_multicloud_gcp_secure && cd actions-runner/mcg_multicloud_gcp_secure
-curl -o actions-runner-linux-x64-2.320.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.320.0/actions-runner-linux-x64-2.320.0.tar.gz
-echo "93ac1b7ce743ee85b5d386f5c1787385ef07b3d7c728ff66ce0d3813d5f46900  actions-runner-linux-x64-2.320.0.tar.gz" | shasum -a 256 -c
-tar xzf ./actions-runner-linux-x64-2.320.0.tar.gz
+    # サービスインストール & 開始
+    # ※同じサーバーで複数回 install しても、ディレクトリが違えば別サービスとして登録されます
+    ./svc.sh install
+    ./svc.sh start
+    
+    echo "=== Completed: $DIR_NAME ==="
+}
 
-# Configure GitHub Actions
-RUNNER_ALLOW_RUNASROOT=1 ./config.sh --url https://github.com/mec-mcg/mcg_multicloud_gcp_secure_dev --token A5RUTNKIDV62GHQLHMQQNKTHD6HCC
+# --- 3. 実行パート (4つのリポジトリを登録) ---
 
-./svc.sh install
-./svc.sh start
+# 1つ目: Standard
+setup_runner "mcg_multicloud_gcp" \
+             "https://github.com/mec-mcg/mcg_multicloud_gcp_dev" \
+             "A5RUTNMV233WG3XQBG5ZPXTHD6GW6" \
+             "main"
 
-# Download GitHub Actions (mcg_multicloud_gcp_api)
-cd /opt
-mkdir -p actions-runner/mcg_multicloud_gcp_api && cd actions-runner/mcg_multicloud_gcp_api
-curl -o actions-runner-linux-x64-2.320.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.320.0/actions-runner-linux-x64-2.320.0.tar.gz
-echo "93ac1b7ce743ee85b5d386f5c1787385ef07b3d7c728ff66ce0d3813d5f46900  actions-runner-linux-x64-2.320.0.tar.gz" | shasum -a 256 -c
-tar xzf ./actions-runner-linux-x64-2.320.0.tar.gz
+# 2つ目: Secure
+setup_runner "mcg_multicloud_gcp_secure" \
+             "https://github.com/mec-mcg/mcg_multicloud_gcp_secure_dev" \
+             "A5RUTNKIDV62GHQLHMQQNKTHD6HCC" \
+             "secure"
 
-# Configure GitHub Actions
-RUNNER_ALLOW_RUNASROOT=1 ./config.sh --url https://github.com/mec-mcg/mcg_multicloud_gcp_api_dev --token A5RUTNNZAAOFVROFFVQGAVTHD6HFO
+# 3つ目: API
+setup_runner "mcg_multicloud_gcp_api" \
+             "https://github.com/mec-mcg/mcg_multicloud_gcp_api_dev" \
+             "A5RUTNNZAAOFVROFFVQGAVTHD6HFO" \
+             "api"
 
-./svc.sh install
-./svc.sh start
+# 4つ目: Static
+setup_runner "mcg_multicloud_gcp_static" \
+             "https://github.com/mec-mcg/mcg_multicloud_gcp_static_dev" \
+             "A5RUTNISRZTY33RSJTIIAQ3HD6HD2" \
+             "static"
 
-# Download GitHub Actions (mcg_multicloud_gcp_static)
-cd /opt
-mkdir -p actions-runner/mcg_multicloud_gcp_static && cd actions-runner/mcg_multicloud_gcp_static
-curl -o actions-runner-linux-x64-2.320.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.320.0/actions-runner-linux-x64-2.320.0.tar.gz
-echo "93ac1b7ce743ee85b5d386f5c1787385ef07b3d7c728ff66ce0d3813d5f46900  actions-runner-linux-x64-2.320.0.tar.gz" | shasum -a 256 -c
-tar xzf ./actions-runner-linux-x64-2.320.0.tar.gz
-
-# Configure GitHub Actions
-RUNNER_ALLOW_RUNASROOT=1 ./config.sh --url https://github.com/mec-mcg/mcg_multicloud_gcp_static_dev --token A5RUTNISRZTY33RSJTIIAQ3HD6HD2
-
-./svc.sh install
-./svc.sh start
+echo "All runners setup complete."
